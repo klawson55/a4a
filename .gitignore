@@ -1,4 +1,5 @@
 *.log
 *.priv
 *.pub
+*.pem
 
