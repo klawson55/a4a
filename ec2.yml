@@ -1,0 +1,19 @@
+AWSTemplateFormatVersion: "2010-09-09"  
+Resources:  
+  WebInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t2.small
+      ImageId: ami-223f945a
+      KeyName: kp-a4a
+      SecurityGroupIds:
+        - sg-55b2052b
+      SubnetId: subnet-4007ba39
+
+
+Outputs: 
+    InstanceID: 
+        Description: EC2 export ID
+        Value: !Ref WebInstance
+        Export:
+          Name: !Join [ ":", [ !Ref "AWS::StackName", WebInstance ] ]

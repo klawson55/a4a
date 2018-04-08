@@ -1,0 +1,99 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: A4A EC2 configuration
+
+Parameters:
+  EnvironmentName:
+    Description: Identify environment as non-prod or production
+    Type: String
+    Default: non-prod
+    AllowedValues:
+        - 'non-prod'
+        - 'prod'
+    ConstraintDescription: Specify either non-prod or prod
+  ApplicationName:
+    Description: The name of the application
+    Type: String
+  Role:
+    Description: name of the tier
+    Type: String
+    Default: web
+  AmiId:
+    Description: The AMI ID
+    Type: AWS::EC2::Image::Id
+  MaximumInstances:
+    Description: The maximum number of instances
+    Type: Number
+    Default: 2
+  MinimumInstances:
+    Description: The minimum number of instances
+    Type: Number
+    Default: 2
+  MinimumViableInstances:
+    Description: The number of instances
+    Type: Number
+    Default: 2
+  InstanceType:
+    Description: The instance type
+    Type: String
+    Default: t2.small
+  KeyName:
+    Description: The key pair name
+    Type: AWS::EC2::KeyPair::KeyName
+  VpcId:
+    Description: The VPC ID
+    Type: AWS::EC2::VPC::Id
+Resources:
+  LaunchConfiguration:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      SecurityGroups:
+        - Fn::ImportValue:
+            !Sub ${VpcId}:${ApplicationName}-${Environment}-${Role}-security-group:id
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -x
+
+          # Create the deploy directory
+          mkdir -p /deploy/artifacts
+          cd /deploy/artifacts
+
+          # Set permissions for Java
+          chown apache:nginx /var/www/html/ecr/java/temp
+
+          systemctl restart nginx
+
+          # report success
+          cfn-signal --region ${AWS::Region} --resource AutoScalingGroup --stack ${AWS::StackName}
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      HealthCheckGracePeriod: 720 # Set to the expected launch time
+      HealthCheckType: ELB
+      LaunchConfigurationName: !Ref LaunchConfiguration
+      LoadBalancerNames:
+        - Fn::ImportValue:
+            !Sub ${VpcId}:${ApplicationName}-${Environment}-${Role}-elb:name
+      MaxSize: !Ref MaximumInstances
+      MinSize: !Ref MinimumInstances
+      VPCZoneIdentifier: !Split
+        - ","
+        - Fn::ImportValue:
+            !Sub ${VpcId}:private-subnet:ids
+    CreationPolicy:
+      ResourceSignal:
+        Count: !Ref MinimumViableInstances
+        Timeout: PT24M
+    UpdatePolicy:
+      AutoScalingScheduledAction:
+        IgnoreUnmodifiedGroupSizeProperties: true
+      AutoScalingRollingUpdate:
+        MinInstancesInService: 1
+        MaxBatchSize: 1
+        WaitOnResourceSignals: true
+        PauseTime: PT15M
+      AutoScalingReplacingUpdate:
+        WillReplace: false

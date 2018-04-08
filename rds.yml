@@ -15,12 +15,6 @@ Parameters:
     Description: Number of days you would like your CloudWatch Logs to be retained
     Type: Number
     Default: 90
-  SSLCertificateArn:
-    Description: The optional SSL/TLS certificate ARN
-    Type: String
-    MinLength: 0
-    MaxLength: 2048
-    Default: ""
   DatabaseUser:
     Default: startupadmin
     Type: String
@@ -56,14 +50,6 @@ Parameters:
       - postgres
       - mariadb
       - mysql
-  EncryptionAtRest:
-    Default: true
-    Type: String
-    Description: The optional flag for encryption at rest (db.t2.small and above)
-    ConstraintDescription: Only true or false are allowed
-    AllowedValues:
-      - true
-      - false
   DatabaseSize:
     Default: 5
     Type: String
@@ -72,139 +58,70 @@ Parameters:
     AllowedPattern: "[5-9]|[1-9][0-9]+"
     ConstraintDescription: Enter a size of at least 5 GB
   DatabaseInstanceClass:
-    Default: db.m4.2xlarge
+    Default: db.r3.large
     Type: String
     Description: Database instance class, e.g. db.t2.micro
     ConstraintDescription: DB instance class not supported
     AllowedValues:
-      - db.m4.2xlarge
-      - db.m4.4xlarge
-      - db.m4.10xlarge
-      - db.m4.16xlarge
+      - db.t2.small
+      - db.t2.medium
+      - db.r3.large
       - db.r4.large
       - db.r4.xlarge
       - db.r4.2xlarge
       - db.r4.4xlarge
       - db.r4.8xlarge
       - db.r4.16xlarge
-  DatabaseEnableAlarms:
-    Default: false
-    Type: String
-    Description: Set to true to enable
-    ConstraintDescription: Only true or false are allowed
-    AllowedValues:
-      - true
-      - false
-  DatabaseEnhancedMonitoring:
-    Default: false
-    Type: String
-    Description: The optional flag for enhanced monitoring
-    ConstraintDescription: Only true or false are allowed
-    AllowedValues:
-      - true
-      - false
-  DatabaseAlarmMaxCpuPercent:
-    Description: Database CPU % max for alarm (aurora, postgres, mariadb, mysql)
-    Type: Number
-    Default: 80
-    MinValue: 1
-    MaxValue: 99
-    ConstraintDescription: Must be a percentage between 1-99%
-  DatabaseAlarmReadLatencyMaxSeconds:
-    Description: Read latency max in seconds for alarm (aurora, postgres, mariadb, mysql)
-    Type: Number
-    Default: 1
-    MinValue: 1
-  DatabaseAlarmWriteLatencyMaxSeconds:
-    Description: Write latency max in seconds for alarm (aurora, postgres, mariadb, mysql)
-    Type: Number
-    Default: 1
-    MinValue: 1
-  DatabaseAlarmEvaluationPeriods:
-    Description: The number of periods over which data is compared to the specified threshold (aurora, postgres, mariadb, mysql)
-    Type: Number
-    Default: 2
-    MinValue: 2
-    ConstraintDescription: Must be at least one
-  DatabaseAlarmEvaluationPeriodSeconds:
-    Description: The time over which the specified statistic is applied. Specify time in seconds, in multiples of 60. Enhanced monitoring must be enabled if less than 500 second (aurora, postgres, mariadb, mysql)
-    Type: Number
-    Default: 300
-    MinValue: 60
-    ConstraintDescription: Must be at least 60 seconds
-  DatabaseAlarmMinFreeSpaceInBytes:
-    Default: 524288000
-    Type: Number
-    Description: Number of min free space bytes for alarm (postgres, mariadb, mysql)
-    MinValue: 1
-    ConstraintDescription: A value of one byte or more
-  DatabaseAlarmSwapUsageInBytes:
-    Default: 209715200
-    Type: Number
-    Description: Number of swap usage bytes for alarm (postgres, mariadb, mysql)
-    MinValue: 1
-    ConstraintDescription: A value of one byte or more
+
 Conditions:
-   IsProd: !Equals [ !Ref EnvironmentName, prod ]
-   IsAurora: !Or [ !Equals [ !Ref DatabaseEngine, aurora ], !Equals [ !Ref DatabaseEngine, aurora-postgresql ] ]
-   IsNotAurora: !Not [ Condition: IsAurora ]
+  IsProd: !Equals [ !Ref EnvironmentName, prod ]
 Resources:
-  AuroraStack:
-    Type: AWS::CloudFormation::Stack
-    Condition: IsAurora
+  DatabaseSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
     Properties:
-      Parameters:
+      DBSubnetGroupDescription: DB subnet group
+      SubnetIds: !Split
+        - ','
+        - !ImportValue vpc:data-subnet:ids
 
-        EnvironmentName: !Ref EnvironmentName
-        DatabaseEngine: !Ref DatabaseEngine
-        DatabaseInstanceClass: !Ref DatabaseInstanceClass
-        DatabaseUser: !Ref DatabaseUser
-        DatabasePassword: !Ref DatabasePassword
-        DatabaseName: !Ref DatabaseName
-        EncryptionAtRest: !Ref EncryptionAtRest
-        EnableAlarms: !Ref DatabaseEnableAlarms
-        EnhancedMonitoring: !Ref DatabaseEnhancedMonitoring
-        DatabaseAlarmMaxCpuPercent: !Ref DatabaseAlarmMaxCpuPercent
-        DatabaseAlarmReadLatencyMaxSeconds: !Ref DatabaseAlarmReadLatencyMaxSeconds
-        DatabaseAlarmWriteLatencyMaxSeconds: !Ref DatabaseAlarmWriteLatencyMaxSeconds
-        DatabaseAlarmEvaluationPeriods: !Ref DatabaseAlarmEvaluationPeriods
-        DatabaseAlarmEvaluationPeriodSeconds: !Ref DatabaseAlarmEvaluationPeriodSeconds
-  RdsStack:
-    Type: AWS::CloudFormation::Stack
-    Condition: IsNotAurora
+  DatabaseCluster:
+    Type: AWS::RDS::DBCluster
     Properties:
-      Parameters:
+      DatabaseName: !Ref DatabaseName
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+      Engine: aurora
+      MasterUsername: !Ref DatabaseUser
+      MasterUserPassword: !Ref DatabasePassword
+      Port: 3306
+      PreferredBackupWindow: 01:00-02:00
+      PreferredMaintenanceWindow: mon:03:00-mon:04:00
 
-        EnvironmentName: !Ref EnvironmentName
-        DatabaseEngine: !Ref DatabaseEngine
-        DatabaseInstanceClass: !Ref DatabaseInstanceClass
-        DatabaseUser: !Ref DatabaseUser
-        DatabasePassword: !Ref DatabasePassword
-        DatabaseName: !Ref DatabaseName
-        EncryptionAtRest: !Ref EncryptionAtRest
-        DatabaseSize: !Ref DatabaseSize
-        EnableAlarms: !Ref DatabaseEnableAlarms
-        EnhancedMonitoring: !Ref DatabaseEnhancedMonitoring
-        DatabaseAlarmMaxCpuPercent: !Ref DatabaseAlarmMaxCpuPercent
-        DatabaseAlarmReadLatencyMaxSeconds: !Ref DatabaseAlarmReadLatencyMaxSeconds
-        DatabaseAlarmWriteLatencyMaxSeconds: !Ref DatabaseAlarmWriteLatencyMaxSeconds
-        DatabaseAlarmEvaluationPeriods: !Ref DatabaseAlarmEvaluationPeriods
-        DatabaseAlarmEvaluationPeriodSeconds: !Ref DatabaseAlarmEvaluationPeriodSeconds
-        DatabaseAlarmMinFreeSpaceInBytes: !Ref DatabaseAlarmMinFreeSpaceInBytes
-        DatabaseAlarmSwapUsageInBytes: !Ref DatabaseAlarmSwapUsageInBytes
+  DatabasePrimaryInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      Engine: aurora
+      DBClusterIdentifier: !Ref DatabaseCluster
+      DBInstanceClass: !Ref DatabaseInstanceClass
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+
+  DatabaseReplicaInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      Engine: aurora
+      DBClusterIdentifier: !Ref DatabaseCluster
+      DBInstanceClass: !Ref DatabaseInstanceClass
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+
 Outputs:
-  Name:
-    Description: Aurora Stack Name
-    Value: !Ref AWS::StackName
+  MasterConnectionString:
+    Description: connection string for the master database
+    Value: !Join ['', [!GetAtt [DatabasePrimaryInstance, Endpoint.Address], ':',
+        !GetAtt [DatabasePrimaryInstance, Endpoint.Port], /, !Ref 'DatabaseName']]
     Export:
-      Name: !Sub ${AWS::StackName}-Name
-  AuroraStackName:
-    Value: !GetAtt AuroraStack.Outputs.Name
-    Condition: IsAurora
+      Name: rds:masterconnectionstring
+  ReplicaConnectionString:
+    Description:  connection string for the replica database
+    Value: !Join ['', [!GetAtt [DatabaseReplicaInstance, Endpoint.Address], ':',
+        !GetAtt [DatabaseReplicaInstance, Endpoint.Port], /, !Ref 'DatabaseName']]
     Export:
-      Name: !Sub ${AWS::StackName}-DatabaseStackName
-  RdsStackName:
-    Value: !GetAtt RdsStack.Outputs.Name
-    Condition: IsNotAurora
-    Export:
-      Name: !Sub ${AWS::StackName}-DatabaseStackName
+      Name: rds:replicaconnectionstring
