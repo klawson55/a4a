@@ -1,0 +1,106 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: A4A Application Load Balancer (ALB)
+
+Parameters:
+  EnvironmentName:
+    Description: Identify environment as non-prod or production
+    Type: String
+    Default: non-prod
+    AllowedValues:
+        - 'non-prod'
+        - 'prod'
+    ConstraintDescription: Specify either non-prod or prod
+  VpcId:
+    Description: The VPC ID
+    Type: AWS::EC2::VPC::Id
+  LoadBalancerScheme:
+    Description: 'Indicates whether the load balancer in front of the ECS service is internet-facing or internal.'
+    Type: String
+    Default: 'internet-facing'
+  LoadBalancerCertificateArn:
+    Description: 'Optional Amazon Resource Name (ARN) of the certificate to associate with the load balancer.'
+    Type: String
+    Default: ''
+  LoadBalancerDeregistrationDelay:
+    Description: 'The amount time (in seconds) to wait before changing the state of a deregistering target from draining to unused.'
+    Type: Number
+    Default: 300
+    ConstraintDescription: 'Must be in the range [0-3600]'
+    MinValue: 0
+    MaxValue: 3600
+  PublicHostedZoneName:
+    Description: DNS zone name with trailing period
+    Type: String
+    Default: klawson.info.
+  PublicHostedZoneId:
+    Description: Route53 Zone ID
+    Type: String
+
+Resources:
+  ALBSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: 'alb-sg'
+      VpcId: !Ref VpcId
+  ALBSecurityGroupInHttpsWorld:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Properties:
+      GroupId: !Ref ALBSecurityGroup
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: '0.0.0.0/0'
+  DefaultTargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      HealthCheckIntervalSeconds: 15
+      HealthCheckPath: '/'
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Matcher:
+        HttpCode: '200-299'
+      Port: 80
+      Protocol: HTTP
+      VpcId: !Ref VpcId
+      TargetGroupAttributes:
+      - Key: deregistration_delay.timeout_seconds
+        Value: !Ref LoadBalancerDeregistrationDelay
+  ALB:
+    Type: 'AWS::ElasticLoadBalancingV2::LoadBalancer'
+    Properties:
+      Name: !Ref EnvironmentName
+      Scheme: !Ref LoadBalancerScheme
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Subnets: !Split
+        - ','
+        - !ImportValue 'vpc:public-subnet:ids'
+      Tags: 
+        - Key: Name
+          Value: !Ref EnvironmentName
+  HttpsListener:
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      Certificates:
+      - CertificateArn: !Ref LoadBalancerCertificateArn
+      DefaultActions:
+      - TargetGroupArn: !Ref DefaultTargetGroup
+        Type: forward
+      LoadBalancerArn: !Ref ALB
+      Port: 443
+      Protocol: HTTPS
+
+Outputs:
+  StackName:
+    Description: 'Stack name.'
+    Value: !Sub '${AWS::StackName}'
+    Export:
+      Name: !Sub '${AWS::StackName}:stackname'
+  DNSName:
+    Description: 'The DNS name for the ECS cluster/service load balancer.'
+    Value: !GetAtt 'ALB.DNSName'
+    Export:
+      Name: !Sub '${AWS::StackName}:DNSName'

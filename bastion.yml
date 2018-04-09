@@ -1,14 +1,8 @@
 AWSTemplateFormatVersion: 2010-09-09
 
-Description: highly available SSH bastion
+Description: deploy SSH bastion
 
 Parameters:
-  VpcId:
-    Description: VPC ID
-    Type: String
-  AmiId:
-    Description: Bastion AMI
-    Type: AWS::EC2::Image::Id
   EnvironmentName:
     Description: Identify environment as non-prod or production
     Type: String
@@ -16,6 +10,12 @@ Parameters:
     AllowedValues:
         - 'non-prod'
         - 'prod'
+  VpcId:
+    Description: VPC ID
+    Type: String
+  AmiId:
+    Description: Bastion AMI
+    Type: AWS::EC2::Image::Id
   KeyName:
     Description: key pair for ssh access
     Type: AWS::EC2::KeyPair::KeyName
@@ -45,14 +45,11 @@ Resources:
       - !Ref EIP
       TTL: 600
       Type: A
-  EIP:
-    Type: 'AWS::EC2::EIP'
-    Properties:
-      Domain: vpc
+
   SecurityGroup:
     Type: 'AWS::EC2::SecurityGroup'
     Properties:
-      GroupDescription: SSH bastion host/instance
+      GroupDescription: SSH to the bastion from the world
       SecurityGroupIngress:
       - IpProtocol: tcp
         FromPort: 22
@@ -60,122 +57,34 @@ Resources:
         CidrIp: '0.0.0.0/0'
       VpcId: !Ref VpcId
 
-
-  LaunchConfiguration:
-    Type: 'AWS::AutoScaling::LaunchConfiguration'
-    Metadata:
-      'AWS::CloudFormation::Init':
-        configSets:
-          default: [ssh-access, config]
-
-        ssh-access:
-          files:
-            '/opt/authorized_keys_command.sh':
-              content: |
-                #!/bin/bash -e
-                if [ -z "$1" ]; then
-                  exit 1
-                fi
-                UnsaveUserName="$1"
-                UnsaveUserName=${UnsaveUserName//".plus."/"+"}
-                UnsaveUserName=${UnsaveUserName//".equal."/"="}
-                UnsaveUserName=${UnsaveUserName//".comma."/","}
-                UnsaveUserName=${UnsaveUserName//".at."/"@"}
-                aws iam list-ssh-public-keys --user-name "$UnsaveUserName" --query "SSHPublicKeys[?Status == 'Active'].[SSHPublicKeyId]" --output text | while read -r KeyId; do
-                  aws iam get-ssh-public-key --user-name "$UnsaveUserName" --ssh-public-key-id "$KeyId" --encoding SSH --query "SSHPublicKey.SSHPublicKeyBody" --output text
-                done
-              mode: '000755'
-              owner: root
-              group: root
-            '/opt/import_users.sh':
-              content: |
-                #!/bin/bash -e
-                aws iam list-users --query "Users[].[UserName]" --output text | while read User; do
-                  SaveUserName="$User"
-                  SaveUserName=${SaveUserName//"+"/".plus."}
-                  SaveUserName=${SaveUserName//"="/".equal."}
-                  SaveUserName=${SaveUserName//","/".comma."}
-                  SaveUserName=${SaveUserName//"@"/".at."}
-                  if [ "${#SaveUserName}" -le "32" ]; then
-                    if ! id -u "$SaveUserName" > /dev/null 2>&1; then
-                      # don't grant sudo rights on bastion host!
-                      /usr/sbin/useradd "$SaveUserName"
-                    fi
-                  else
-                    echo "Can not import IAM user ${SaveUserName}. User name is longer than 32 characters."
-                  fi
-                done
-              mode: '000755'
-              owner: root
-              group: root
-            '/etc/cron.d/import_users':
-              content: |
-                */10 * * * * root /opt/import_users.sh
-              mode: '000644'
-              owner: root
-              group: root
-          commands:
-            'a_configure_sshd_command':
-              command: 'sed -i "s:#AuthorizedKeysCommand none:AuthorizedKeysCommand /opt/authorized_keys_command.sh:g" /etc/ssh/sshd_config'
-            'b_configure_sshd_commanduser':
-              command: 'sed -i "s:#AuthorizedKeysCommandUser nobody:AuthorizedKeysCommandUser nobody:g" /etc/ssh/sshd_config'
-            'c_import_users':
-              command: './import_users.sh'
-              cwd: '/opt'
-          services:
-            sysvinit:
-              sshd:
-                enabled: true
-                ensureRunning: true
-                commands:
-                - 'a_configure_sshd_command'
-                - 'b_configure_sshd_commanduser'
-
+  EIP:
+    Type: AWS::EC2::EIP
     Properties:
-      AssociatePublicIpAddress: true
-      EbsOptimized: false
-      ImageId: !Ref AmiId
+      InstanceId: !Ref Bastion
+      Domain: vpc
+
+  Bastion:
+    Type: AWS::EC2::Instance
+    Properties:
       InstanceType: !Ref InstanceType
-      SecurityGroups:
-      - !Ref SecurityGroup
-      KeyName: !If [HasKeyName, !Ref KeyName, !Ref 'AWS::NoValue']
-      UserData:
-        'Fn::Base64': !Sub |
-          #!/bin/bash -ex
-          trap '/opt/aws/bin/cfn-signal -e 1 --stack ${AWS::StackName} --resource AutoScalingGroup --region ${AWS::Region}' ERR
-          INSTANCEID=$(curl -s -m 60 http://169.254.169.254/latest/meta-data/instance-id)
-          aws --region ${AWS::Region} ec2 associate-address --instance-id $INSTANCEID --allocation-id ${EIP.AllocationId}
-          /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource LaunchConfiguration --region ${AWS::Region}
-          /opt/aws/bin/cfn-signal -e 0 --stack ${AWS::StackName} --resource AutoScalingGroup --region ${AWS::Region}
-  AutoScalingGroup:
-    Type: 'AWS::AutoScaling::AutoScalingGroup'
-    Properties:
-      DesiredCapacity: 1
-      LaunchConfigurationName: !Ref LaunchConfiguration
-      MaxSize: 1
-      MinSize: 1
-      Tags:
-      - Key: Name
-        Value: 'SSH bastion'
-        PropagateAtLaunch: true
+      ImageId: !Ref AmiId
+      KeyName: !Ref KeyName
+      SecurityGroupIds:
+        - !Ref SecurityGroup
+      SubnetId: subnet-240ab75d
 
-      VPCZoneIdentifier: !Split
-        - ','
-        - !ImportValue vpc:data-subnet:ids
-    CreationPolicy:
-      ResourceSignal:
-        Count: 1
-        Timeout: PT10M
-    UpdatePolicy:
-      AutoScalingRollingUpdate:
-        PauseTime: PT10M
-        SuspendProcesses:
-        - HealthCheck
-        - ReplaceUnhealthy
-        - AZRebalance
-        - AlarmNotification
-        - ScheduledActions
-        WaitOnResourceSignals: true
+      UserData:
+        Fn::Base64: !Sub | 
+          #!/bin/bash -ex
+          mkdir /opt/deploy
+          cd /opt/deploy
+          curl -O https://bootstrap.pypa.io/get-pip.py
+          python get-pip.py
+          pip install --upgrade pip &> deploy.out
+          pip install awscli --ignore-installed six &>> deploy.out
+          easy_install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-latest.tar.gz &>> deploy.out
+          export INSTANCEID=$(curl -s -m 60 http://169.254.169.254/latest/meta-data/instance-id) &>> deploy.out
+
 Outputs:
   SecurityGroup:
     Description: 'Use this Security Group to reference incoming traffic from the SSH bastion host/instance.'

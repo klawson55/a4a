@@ -1,15 +1,31 @@
 AWSTemplateFormatVersion: "2010-09-09"  
 Resources:  
+  WebElasticIp:
+    Type: AWS::EC2::EIP
+    Properties:
+      InstanceId: !Ref WebInstance
+      Domain: vpc
   WebInstance:
     Type: AWS::EC2::Instance
     Properties:
-      InstanceType: t2.small
+      InstanceType: t2.micro
       ImageId: ami-223f945a
       KeyName: kp-a4a
       SecurityGroupIds:
         - sg-55b2052b
       SubnetId: subnet-4007ba39
 
+      UserData:
+        Fn::Base64: !Sub | 
+            #!/bin/bash -ex
+            mkdir /opt/deploy
+            cd /opt/deploy
+            curl -O https://bootstrap.pypa.io/get-pip.py
+            python get-pip.py
+            pip install --upgrade pip &> pip.out
+            pip install awscli --ignore-installed six &>> pip.out
+            easy_install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-latest.tar.gz
+            export INSTANCEID=$(curl -s -m 60 http://169.254.169.254/latest/meta-data/instance-id)
 
 Outputs: 
     InstanceID: 

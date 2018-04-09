@@ -1,25 +1,29 @@
 #!/bin/bash
 set +x
-#set -x
-#trap read debug
+
+# Registered klawson.info with goDaddy and delegated DNS to Route 53
+# Requested a public certificate, validated with DNS CNAME record
 
 APPNAME=a4a
-DOMAINNAME=klawson.info
+DOMAIN_NAME=klawson.info
 REGION=us-west-2
 ENVIRONMENT=$1
 DBPASSWORD=$2
 AMI_ID=ami-223f945a  #Red Hat Enterprise Linux 7.4 (HVM), SSD
+INSTANCETYPE=t2.small
 
 # create DNS zone if it doesn't exist
-myZones=$(
-  aws route53 list-hosted-zones --query 'HostedZones[*].{ID:Id,Name:Name}' --output=text
+ZONE_ID=$(
+  aws route53 list-hosted-zones --query 'HostedZones[*].Id' --output text
 )
-if [ -z "$myZones" ] || ! [[ $myZones =~ .*$DOMAINNAME*. ]]; then
-  aws route53 create-hosted-zone --name $DOMAINNAME --caller-reference "createZone-`date -u +"%Y-%m-%dT%H:%M:%SZ"`"
+if [ -z "$ZONE_ID" ] || ! [[ $ZONE_ID =~ .*$DOMAIN_NAME*. ]]; then
+  aws route53 create-hosted-zone --name $DOMAIN_NAME --caller-reference "createZone-`date -u +"%Y-%m-%dT%H:%M:%SZ"`"
   sleep 10
 else
   echo "Found DNS zone"
 fi
+# the query is returning /hostedzone/Z2KUT1VP1GH4IB; need just the zone ID
+ZONE_ID=Z2KUT1VP1GH4IB
 
 # get certificate arn
 CERT_ARN=$(
@@ -51,22 +55,25 @@ else
   echo "Found bastion key pair"
 fi
 
+set -x
+trap read debug
+
 # create a bastion if it doesn't exist
 BASTION=$(
-  aws ec2 describe-instances 
+  aws cloudformation describe-stacks --stack-name bastion --query 'Stacks[*].StackId' --output text
 )
 if  [ -z "$BASTION" ] || [ "${BASTION}" == "None" ]; then
-aws cloudformation create-stack \
-	--region=$REGION \
-	--stack-name bastion \
-	--template-body file://bastion.yml \
-	--parameters ParameterKey=EnvironmentName,ParameterValue=$ENVIRONMENT \
-	ParameterKey=VpcId,ParameterValue=$VPC_ID \
-	ParameterKey=AmiId,ParameterValue=$AMI_ID \
-	ParameterKey=KeyName,ParameterValue=kp-bastion \
-	ParameterKey=InstanceType,ParameterValue=t2.small \
-	ParameterKey=SubDomainName,ParameterValue=ssh-bastion \
-	ParameterKey=PublicHostedZoneName,ParameterValue=klawson.info.
+	aws cloudformation create-stack \
+		--region=$REGION \
+		--stack-name bastion \
+		--template-body file://bastion.yml \
+		--parameters ParameterKey=EnvironmentName,ParameterValue=$ENVIRONMENT \
+		ParameterKey=VpcId,ParameterValue=$VPC_ID \
+		ParameterKey=AmiId,ParameterValue=$AMI_ID \
+		ParameterKey=KeyName,ParameterValue=kp-bastion \
+		ParameterKey=InstanceType,ParameterValue=$INSTANCETYPE \
+		ParameterKey=SubDomainName,ParameterValue=ssh \
+		ParameterKey=PublicHostedZoneName,ParameterValue=klawson.info.
 
   aws cloudformation wait stack-create-complete --stack-name bastion
 else
@@ -74,8 +81,8 @@ else
 fi
 
 # create an application keypair if it doesn't exist
-KEY_EXISTS=$(aws ec2 describe-key-pairs --key-names kp-$APPNAME --output text)
-if [ -z "$KEY_EXISTS" ]; then
+APP_KEY=$(aws ec2 describe-key-pairs --key-names kp-$APPNAME --output text)
+if [ -z "$APP_KEY" ]; then
   aws ec2 create-key-pair --key-name kp-$APPNAME --query 'KeyMaterial' --output text > ~/.ssh/kp-$APPNAME.pem
   chmod 0400 ~/.ssh/kp-$APPNAME.pem
 else
@@ -111,25 +118,48 @@ DB_WRITER_ARN=$(
   aws rds describe-db-instances --db-instance-identifier rdf7cqpw6n9uv --query 'DBInstances[*].DBInstanceArn' --output text
 )
 
-set -x
-trap read debug
-
-# create launch config if it doesn't exist
-db=$(
-  aws cloudformation describe-stacks --stack-name asg
+# create ALB if it doesn't exist
+ALB=$(
+  aws cloudformation describe-stacks --stack-name asg --query 'Stacks[*].StackId' --output text
 )
-if  [ -z "$db" ] || [ "${db}" == "None" ] || [ ${#db} -lt 50 ]; then
+if  [ -z "$ALB" ] || [ "${ALB}" == "None" ] || [ ${#ALB} -lt 50 ]; then
 aws cloudformation create-stack \
 	--region=$REGION \
-	--stack-name rds \
-	--template-body file://rds.yml \
+	--stack-name alb \
+	--template-body file://alb.yml \
 	--parameters ParameterKey=EnvironmentName,ParameterValue=$ENVIRONMENT \
-	ParameterKey=DatabaseInstanceClass,ParameterValue=db.t2.small \
-	ParameterKey=DatabaseEngine,ParameterValue=aurora \
-	ParameterKey=DatabaseUser,ParameterValue=dbadmin \
-	ParameterKey=DatabasePassword,ParameterValue=$DBPASSWORD \
-	ParameterKey=DatabaseName,ParameterValue=nonProdA4A
+	ParameterKey=LoadBalancerScheme,ParameterValue='internet-facing' \
+	ParameterKey=LoadBalancerCertificateArn,ParameterValue=$CERT_ARN \
+	ParameterKey=LoadBalancerDeregistrationDelay,ParameterValue=300 \
+	ParameterKey=PublicHostedZoneName,ParameterValue=$DOMAIN_NAME \
+	ParameterKey=PublicHostedZoneId,ParameterValue=$ZONE_ID \
+	ParameterKey=VpcId,ParameterValue=$VPC_ID
+	
+  aws cloudformation wait stack-create-complete --stack-name rds
+else
+  echo "Found ALB"
+fi
 
+# create launch config if it doesn't exist
+ASG=$(
+  aws cloudformation describe-stacks --stack-name asg --query 'Stacks[*].StackId' --output text
+)
+if  [ -z "$ASG" ] || [ "${ASG}" == "None" ] || [ ${#ASG} -lt 50 ]; then
+aws cloudformation create-stack \
+	--region=$REGION \
+	--stack-name asg \
+	--template-body file://asg.yml \
+	--parameters ParameterKey=EnvironmentName,ParameterValue=$ENVIRONMENT \
+	ParameterKey=ApplicationName,ParameterValue=$APPNAME \
+	ParameterKey=Role,ParameterValue=web \
+	ParameterKey=AmiId,ParameterValue=$AMI_ID \
+	ParameterKey=MaximumInstances,ParameterValue=2 \
+	ParameterKey=MinimumInstances,ParameterValue=2 \
+	ParameterKey=MinimumViableInstances,ParameterValue=2 \
+	ParameterKey=InstanceType,ParameterValue=$INSTANCETYPE \
+	ParameterKey=KeyName,ParameterValue=$APP_KEY \
+	ParameterKey=VpcId,ParameterValue=$VPC_ID
+	
   aws cloudformation wait stack-create-complete --stack-name rds
 else
   echo "Found launch configuration"

@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: 2010-09-09
 
-Description: A4A EC2 configuration
+Description: A4A Auto-scaling group configuration
 
 Parameters:
   EnvironmentName:
@@ -56,15 +56,14 @@ Resources:
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash -x
-
-          # Create the deploy directory
-          mkdir -p /deploy/artifacts
-          cd /deploy/artifacts
-
-          # Set permissions for Java
-          chown apache:nginx /var/www/html/ecr/java/temp
-
-          systemctl restart nginx
+          mkdir /opt/deploy
+          cd /opt/deploy
+          curl -O https://bootstrap.pypa.io/get-pip.py
+          python get-pip.py
+          pip install --upgrade pip &> deploy.out
+          pip install awscli --ignore-installed six &>> deploy.out
+          easy_install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-latest.tar.gz &>> deploy.out
+          export INSTANCEID=$(curl -s -m 60 http://169.254.169.254/latest/meta-data/instance-id) &>> deploy.out
 
           # report success
           cfn-signal --region ${AWS::Region} --resource AutoScalingGroup --stack ${AWS::StackName}
