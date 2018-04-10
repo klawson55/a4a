@@ -95,10 +95,15 @@ Resources:
 
 Outputs:
   StackName:
-    Description: 'Stack name.'
+    Description: 'Stack name'
     Value: !Sub '${AWS::StackName}'
     Export:
       Name: !Sub '${AWS::StackName}:stackname'
+  SecurityGroup:
+    Description: 'ALB security group'
+    Value: !Ref ALBSecurityGroup
+    Export:
+      Name: !Sub 'alb:security-group'
   DNSName:
     Description: 'The DNS name for the ECS cluster/service load balancer.'
     Value: !GetAtt 'ALB.DNSName'

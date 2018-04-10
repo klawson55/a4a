@@ -28,11 +28,11 @@ Parameters:
   MinimumInstances:
     Description: The minimum number of instances
     Type: Number
-    Default: 2
+    Default: 1
   MinimumViableInstances:
     Description: The number of instances
     Type: Number
-    Default: 2
+    Default: 1
   InstanceType:
     Description: The instance type
     Type: String
@@ -40,10 +40,34 @@ Parameters:
   KeyName:
     Description: The key pair name
     Type: AWS::EC2::KeyPair::KeyName
+  TargetGroupARNs:
+    Description: Target group for the instances
+    Type: String
   VpcId:
     Description: The VPC ID
     Type: AWS::EC2::VPC::Id
 Resources:
+  InstanceSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: 'asg-sg'
+      VpcId: !Ref VpcId
+  InstanceSecurityGroupInFromALB:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Properties:
+      GroupId: !Ref InstanceSecurityGroup
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      SourceSecurityGroupId: !ImportValue 'alb:security-group'
+  InstanceSecurityGroupInFromBastion:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Properties:
+      GroupId: !Ref InstanceSecurityGroup
+      IpProtocol: tcp
+      FromPort: 22
+      ToPort: 22
+      SourceSecurityGroupId: !ImportValue 'bastion-SecurityGroup'
   LaunchConfiguration:
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
@@ -51,8 +75,7 @@ Resources:
       InstanceType: !Ref InstanceType
       KeyName: !Ref KeyName
       SecurityGroups:
-        - Fn::ImportValue:
-            !Sub ${VpcId}:${ApplicationName}-${Environment}-${Role}-security-group:id
+        - !Ref InstanceSecurityGroup
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash -x
@@ -65,6 +88,11 @@ Resources:
           easy_install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-latest.tar.gz &>> deploy.out
           export INSTANCEID=$(curl -s -m 60 http://169.254.169.254/latest/meta-data/instance-id) &>> deploy.out
 
+          yum install –y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm -y
+          yum install nginx -y
+          systemctl start nginx
+          
+          # update vi /usr/share/nginx/html/index.html  root:root 644
           # report success
           cfn-signal --region ${AWS::Region} --resource AutoScalingGroup --stack ${AWS::StackName}
   AutoScalingGroup:
@@ -73,15 +101,13 @@ Resources:
       HealthCheckGracePeriod: 720 # Set to the expected launch time
       HealthCheckType: ELB
       LaunchConfigurationName: !Ref LaunchConfiguration
-      LoadBalancerNames:
-        - Fn::ImportValue:
-            !Sub ${VpcId}:${ApplicationName}-${Environment}-${Role}-elb:name
       MaxSize: !Ref MaximumInstances
       MinSize: !Ref MinimumInstances
+      TargetGroupARNs: 
+        - !Ref TargetGroupARNs
       VPCZoneIdentifier: !Split
-        - ","
-        - Fn::ImportValue:
-            !Sub ${VpcId}:private-subnet:ids
+        - ','
+        - !ImportValue vpc:public-subnet:ids
     CreationPolicy:
       ResourceSignal:
         Count: !Ref MinimumViableInstances
