@@ -80,15 +80,6 @@ else
   echo "Found database"
 fi
 
-# create an application keypair if it doesn't exist
-APP_KEY=$(aws ec2 describe-key-pairs --key-names kp-$APPNAME --output text)
-if [ -z "$APP_KEY" ]; then
-  aws ec2 create-key-pair --key-name kp-$APPNAME --query 'KeyMaterial' --output text > ~/.ssh/kp-$APPNAME.pem
-  chmod 0400 ~/.ssh/kp-$APPNAME.pem
-else
-  echo "Found application key pair"
-fi
-
 # create database if it doesn't exist
 db=$(
   aws rds describe-db-instances
@@ -123,28 +114,40 @@ ALB=$(
   aws cloudformation describe-stacks --stack-name asg --query 'Stacks[*].StackId' --output text
 )
 if  [ -z "$ALB" ] || [ "${ALB}" == "None" ] || [ ${#ALB} -lt 50 ]; then
-aws cloudformation create-stack \
-	--region=$REGION \
-	--stack-name alb \
-	--template-body file://alb.yml \
-	--parameters ParameterKey=EnvironmentName,ParameterValue=$ENVIRONMENT \
-	ParameterKey=LoadBalancerScheme,ParameterValue='internet-facing' \
-	ParameterKey=LoadBalancerCertificateArn,ParameterValue=$CERT_ARN \
-	ParameterKey=LoadBalancerDeregistrationDelay,ParameterValue=300 \
-	ParameterKey=PublicHostedZoneName,ParameterValue=$DOMAIN_NAME \
-	ParameterKey=PublicHostedZoneId,ParameterValue=$ZONE_ID \
-	ParameterKey=VpcId,ParameterValue=$VPC_ID
+	aws cloudformation create-stack \
+		--region=$REGION \
+		--stack-name alb \
+		--template-body file://alb.yml \
+		--parameters ParameterKey=EnvironmentName,ParameterValue=$ENVIRONMENT \
+		ParameterKey=LoadBalancerScheme,ParameterValue='internet-facing' \
+		ParameterKey=LoadBalancerCertificateArn,ParameterValue=$CERT_ARN \
+		ParameterKey=LoadBalancerDeregistrationDelay,ParameterValue=300 \
+		ParameterKey=PublicHostedZoneName,ParameterValue=$DOMAIN_NAME \
+		ParameterKey=PublicHostedZoneId,ParameterValue=$ZONE_ID \
+		ParameterKey=VpcId,ParameterValue=$VPC_ID
 	
   aws cloudformation wait stack-create-complete --stack-name rds
 else
   echo "Found ALB"
 fi
 
-# create launch config if it doesn't exist
+# create an application keypair if it doesn't exist
+APP_KEY=$(aws ec2 describe-key-pairs --key-names kp-$APPNAME --output text)
+if [ -z "$APP_KEY" ]; then
+  aws ec2 create-key-pair --key-name kp-$APPNAME --query 'KeyMaterial' --output text > ~/.ssh/kp-$APPNAME.pem
+  chmod 0400 ~/.ssh/kp-$APPNAME.pem
+else
+  echo "Found application key pair"
+fi
+
+# create auto-scaling group if it doesn't exist
 ASG=$(
   aws cloudformation describe-stacks --stack-name asg --query 'Stacks[*].StackId' --output text
 )
 if  [ -z "$ASG" ] || [ "${ASG}" == "None" ] || [ ${#ASG} -lt 50 ]; then
+  TARGET_GROUP_ARN=$(
+	  aws elbv2 describe-target-groups --query 'TargetGroups[*].TargetGroupArn' --output text
+	)
 aws cloudformation create-stack \
 	--region=$REGION \
 	--stack-name asg \
@@ -154,10 +157,11 @@ aws cloudformation create-stack \
 	ParameterKey=Role,ParameterValue=web \
 	ParameterKey=AmiId,ParameterValue=$AMI_ID \
 	ParameterKey=MaximumInstances,ParameterValue=2 \
-	ParameterKey=MinimumInstances,ParameterValue=2 \
-	ParameterKey=MinimumViableInstances,ParameterValue=2 \
+	ParameterKey=MinimumInstances,ParameterValue=1 \
+	ParameterKey=MinimumViableInstances,ParameterValue=1 \
 	ParameterKey=InstanceType,ParameterValue=$INSTANCETYPE \
-	ParameterKey=KeyName,ParameterValue=$APP_KEY \
+	ParameterKey=KeyName,ParameterValue=kp-$APPNAME \
+  ParameterKey=TargetGroupARNs,ParameterValue=$TARGET_GROUP_ARN \
 	ParameterKey=VpcId,ParameterValue=$VPC_ID
 	
   aws cloudformation wait stack-create-complete --stack-name rds

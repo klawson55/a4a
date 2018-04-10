@@ -221,6 +221,8 @@ Outputs:
     PrivateSubnets:
         Description: A list of the private subnets
         Value: !Join [ ",", [ !Ref PrivateSubnet1, !Ref PrivateSubnet2 ]]
+        Export:
+          Name: vpc:private-subnet:ids
     DataSubnets:
         Description: A list of the private subnets
         Value: !Join [ ",", [ !Ref DataSubnet1, !Ref DataSubnet2 ]]
