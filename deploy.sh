@@ -13,8 +13,9 @@ AMI_ID=ami-223f945a  #Red Hat Enterprise Linux 7.4 (HVM), SSD
 INSTANCETYPE=t2.small
 
 # create DNS zone if it doesn't exist
+# the query is returning /hostedzone/Z2KUT1VP1GH4IB; need just the zone ID
 ZONE_ID=$(
-  aws route53 list-hosted-zones --query 'HostedZones[*].Id' --output text
+  aws route53 list-hosted-zones --query 'HostedZones[*].Id' --output text | awk -F'/' '{print $3}'
 )
 if [ -z "$ZONE_ID" ] || ! [[ $ZONE_ID =~ .*$DOMAIN_NAME*. ]]; then
   aws route53 create-hosted-zone --name $DOMAIN_NAME --caller-reference "createZone-`date -u +"%Y-%m-%dT%H:%M:%SZ"`"
@@ -22,8 +23,6 @@ if [ -z "$ZONE_ID" ] || ! [[ $ZONE_ID =~ .*$DOMAIN_NAME*. ]]; then
 else
   echo "Found DNS zone"
 fi
-# the query is returning /hostedzone/Z2KUT1VP1GH4IB; need just the zone ID
-ZONE_ID=Z2KUT1VP1GH4IB
 
 # get certificate arn
 CERT_ARN=$(
