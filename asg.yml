@@ -81,26 +81,21 @@ Resources:
           #!/bin/bash -x
           mkdir /opt/deploy
           cd /opt/deploy
-          curl -O https://bootstrap.pypa.io/get-pip.py
+          yum install wget -y
+          
+          wget https://bootstrap.pypa.io/get-pip.py
           python get-pip.py
           pip install --upgrade pip &> deploy.out
           pip install awscli --ignore-installed six &>> deploy.out
           easy_install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-latest.tar.gz &>> deploy.out
           export INSTANCEID=$(curl -s -m 60 http://169.254.169.254/latest/meta-data/instance-id) &>> deploy.out
-
-          yum install –y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm -y
-          yum install nginx -y
-          systemctl start nginx
           
-          export myIP=$(hostname -I | awk '{print $1}')
-          echo '<h1 style="color: #5e9ca0;">Kevin Lawson</h1>' > /usr/share/nginx/html/index.html
-          echo '<p><strong><span style="color: #008080;">A4A demonstration website</span></strong></p>' >> /usr/share/nginx/html/index.html
-          echo '<p><strong><span style="color: #008080;">Pretty much the most boring website ever</span></strong></p>' >> /usr/share/nginx/html/index.html
-          echo '<h2 style="color: #2e6c80;">&nbsp;</h2>' >> /usr/share/nginx/html/index.html
-          echo '<p id="date"></p>' >> /usr/share/nginx/html/index.html
-          echo '<script>' >> /usr/share/nginx/html/index.html
-          echo 'document.getElementById("date").innerHTML = Date();' >> /usr/share/nginx/html/index.html
-          echo '</script>' >> /usr/share/nginx/html/index.html
+          wget https://packages.chef.io/files/stable/chef/14.0.190/el/7/chef-14.0.190-1.el7.x86_64.rpm 
+          rpm -i chef-14.0.190-1.el7.x86_64.rpm
+          wget https://s3-us-west-2.amazonaws.com/a4a-klawson/a4a-cookbook.tgz
+          tar xvzf a4a-cookbook.tgz
+          cd cookbooks
+          chef-client -z --runlist a4a
           
           # report success
           cfn-signal --region ${AWS::Region} --resource AutoScalingGroup --stack ${AWS::StackName}
@@ -116,7 +111,7 @@ Resources:
         - !Ref TargetGroupARNs
       VPCZoneIdentifier: !Split
         - ','
-        - !ImportValue vpc:public-subnet:ids
+        - !ImportValue vpc:private-subnet:ids
     CreationPolicy:
       ResourceSignal:
         Count: !Ref MinimumViableInstances
