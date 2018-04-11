@@ -8,7 +8,7 @@ yum_repository 'epel' do
   description "Extra Packages for Enterprise Linux 7"
   baseurl "http://download.fedoraproject.org/pub/epel/7/$basearch"
   gpgcheck false
-	action :create
+  action :create
 end
 
 package 'nginx' do

@@ -147,21 +147,21 @@ if  [ -z "$ASG" ] || [ "${ASG}" == "None" ] || [ ${#ASG} -lt 50 ]; then
   TARGET_GROUP_ARN=$(
 	  aws elbv2 describe-target-groups --query 'TargetGroups[*].TargetGroupArn' --output text
 	)
-aws cloudformation create-stack \
-	--region=$REGION \
-	--stack-name asg \
-	--template-body file://asg.yml \
-	--parameters ParameterKey=EnvironmentName,ParameterValue=$ENVIRONMENT \
-	ParameterKey=ApplicationName,ParameterValue=$APPNAME \
-	ParameterKey=Role,ParameterValue=web \
-	ParameterKey=AmiId,ParameterValue=$AMI_ID \
-	ParameterKey=MaximumInstances,ParameterValue=2 \
-	ParameterKey=MinimumInstances,ParameterValue=1 \
-	ParameterKey=MinimumViableInstances,ParameterValue=1 \
-	ParameterKey=InstanceType,ParameterValue=$INSTANCETYPE \
-	ParameterKey=KeyName,ParameterValue=kp-$APPNAME \
-  ParameterKey=TargetGroupARNs,ParameterValue=$TARGET_GROUP_ARN \
-	ParameterKey=VpcId,ParameterValue=$VPC_ID
+	aws cloudformation create-stack \
+		--region=$REGION \
+		--stack-name asg \
+		--template-body file://asg.yml \
+		--parameters ParameterKey=EnvironmentName,ParameterValue=$ENVIRONMENT \
+		ParameterKey=ApplicationName,ParameterValue=$APPNAME \
+		ParameterKey=Role,ParameterValue=web \
+		ParameterKey=AmiId,ParameterValue=$AMI_ID \
+		ParameterKey=MaximumInstances,ParameterValue=2 \
+		ParameterKey=MinimumInstances,ParameterValue=1 \
+		ParameterKey=MinimumViableInstances,ParameterValue=1 \
+		ParameterKey=InstanceType,ParameterValue=$INSTANCETYPE \
+		ParameterKey=KeyName,ParameterValue=kp-$APPNAME \
+		ParameterKey=TargetGroupARNs,ParameterValue=$TARGET_GROUP_ARN \
+		ParameterKey=VpcId,ParameterValue=$VPC_ID
 	
   aws cloudformation wait stack-create-complete --stack-name rds
 else
