@@ -78,7 +78,8 @@ Resources:
       Subnets: !Split
         - ','
         - !ImportValue 'vpc:public-subnet:ids'
-      Tags: 
+      Type: application
+      Tags:
         - Key: Name
           Value: !Ref EnvironmentName
   HttpsListener:
@@ -92,6 +93,17 @@ Resources:
       LoadBalancerArn: !Ref ALB
       Port: 443
       Protocol: HTTPS
+  AliasRecordSet:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      HostedZoneName: !Ref PublicHostedZoneName
+      Comment: ALB alias record
+      RecordSets:
+      - Name: a4a
+        Type: A
+        AliasTarget:
+          HostedZoneId: !GetAtt ALB.CanonicalHostedZoneID
+          DNSName: !GetAtt myELB.DNSName
 
 Outputs:
   StackName:

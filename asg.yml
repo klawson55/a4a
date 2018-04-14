@@ -40,7 +40,7 @@ Parameters:
   KeyName:
     Description: The key pair name
     Type: AWS::EC2::KeyPair::KeyName
-  TargetGroupARNs:
+  TGARNs:
     Description: Target group for the instances
     Type: String
   VpcId:
@@ -82,21 +82,21 @@ Resources:
           mkdir /opt/deploy
           cd /opt/deploy
           yum install wget -y
-          
+
           wget https://bootstrap.pypa.io/get-pip.py
           python get-pip.py
           pip install --upgrade pip &> deploy.out
           pip install awscli --ignore-installed six &>> deploy.out
           easy_install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-latest.tar.gz &>> deploy.out
           export INSTANCEID=$(curl -s -m 60 http://169.254.169.254/latest/meta-data/instance-id) &>> deploy.out
-          
-          wget https://packages.chef.io/files/stable/chef/14.0.190/el/7/chef-14.0.190-1.el7.x86_64.rpm 
+
+          wget https://packages.chef.io/files/stable/chef/14.0.190/el/7/chef-14.0.190-1.el7.x86_64.rpm
           rpm -i chef-14.0.190-1.el7.x86_64.rpm
           wget https://s3-us-west-2.amazonaws.com/a4a-klawson/a4a-cookbook.tgz
           tar xvzf a4a-cookbook.tgz
           cd cookbooks
           chef-client -z --runlist a4a
-          
+
           # report success
           cfn-signal --region ${AWS::Region} --resource AutoScalingGroup --stack ${AWS::StackName}
   AutoScalingGroup:
@@ -107,8 +107,8 @@ Resources:
       LaunchConfigurationName: !Ref LaunchConfiguration
       MaxSize: !Ref MaximumInstances
       MinSize: !Ref MinimumInstances
-      TargetGroupARNs: 
-        - !Ref TargetGroupARNs
+      TargetGroupARNs:
+        - !Ref TGARNs
       VPCZoneIdentifier: !Split
         - ','
         - !ImportValue vpc:private-subnet:ids

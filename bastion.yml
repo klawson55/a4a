@@ -71,10 +71,10 @@ Resources:
       KeyName: !Ref KeyName
       SecurityGroupIds:
         - !Ref SecurityGroup
-      SubnetId: subnet-240ab75d
+      SubnetId: !Select [1, !Split [",", !ImportValue 'vpc:public-subnet:ids']]
 
       UserData:
-        Fn::Base64: !Sub | 
+        Fn::Base64: !Sub |
           #!/bin/bash -ex
           mkdir /opt/deploy
           cd /opt/deploy
