@@ -16,3 +16,6 @@ aws cloudformation wait stack-delete-complete --stack-name bastion
 
 aws cloudformation delete-stack --stack-name vpc
 aws cloudformation wait stack-delete-complete --stack-name vpc
+
+aws ec2 delete-key-pair --key-name kp-bastion
+aws ec2 delete-key-pair --key-name kp-a4a
