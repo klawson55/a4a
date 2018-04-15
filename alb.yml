@@ -11,6 +11,9 @@ Parameters:
         - 'non-prod'
         - 'prod'
     ConstraintDescription: Specify either non-prod or prod
+  ApplicationName:
+    Description: The name of the application
+    Type: String
   VpcId:
     Description: The VPC ID
     Type: AWS::EC2::VPC::Id
@@ -99,11 +102,11 @@ Resources:
       HostedZoneName: !Ref PublicHostedZoneName
       Comment: ALB alias record
       RecordSets:
-      - Name: a4a
+      - Name: !Sub '${ApplicationName}.${PublicHostedZoneName}'
         Type: A
         AliasTarget:
           HostedZoneId: !GetAtt ALB.CanonicalHostedZoneID
-          DNSName: !GetAtt myELB.DNSName
+          DNSName: !GetAtt ALB.DNSName
 
 Outputs:
   StackName:

@@ -72,7 +72,10 @@ Resources:
       SecurityGroupIds:
         - !Ref SecurityGroup
       SubnetId: !Select [1, !Split [",", !ImportValue 'vpc:public-subnet:ids']]
-
+      Tags:
+        -
+          Key: Name
+          Value: ssh-bastion
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash -ex

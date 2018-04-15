@@ -1,9 +1,12 @@
 #!/bin/bash
 # Registered klawson.info with goDaddy and delegated DNS to Route 53
 # Requested a public certificate, validated with DNS CNAME record
+set +x
 
 #set -x
 #trap read debug
+# add logic to compress and upload amazonaws.com/a4a-klawson/a4a-cookbook.tgz
+# referenced in the launch LaunchConfiguration
 
 if [ "$#" -lt 2 ]; then
   echo "Usage: bash deploy.sh ENVIRONMENT DB_PASSWORD REGION"
@@ -21,7 +24,6 @@ fi
 ENVIRONMENT=$1
 DBPASSWORD=$2
 AMI_ID=ami-223f945a  #Red Hat Enterprise Linux 7.4 (HVM), SSD
-BASTION_KEY_NAME=kp-bastion
 INSTANCETYPE=t2.small
 
 # create DNS zone if it doesn't exist
@@ -73,25 +75,25 @@ if [ "${STACK_ACTION}" == "create" ]; then
   )
 fi
 
+# create a bastion if it doesn't exist.  Will update if anything changed
+BASTION_HOSTNAME=ssh
+STACK_NAME=bastion
 # create a bastion keypair if it doesn't exist
 KEY_EXISTS=$(
-  aws ec2 describe-key-pairs --key-names $BASTION_KEY_NAME --output text
+  aws ec2 describe-key-pairs --key-names kp-$STACK_NAME --output text
 )
 if [ -z "$KEY_EXISTS" ]; then
-  if [ -f ~/.ssh/kp-bastion.pem ]; then
-    mv ~/.ssh/kp-bastion.pem ~/.ssh/kp-bastion.pem-$DEPLOY_DATETIME
+  if [ -f ~/.ssh/kp-$STACK_NAME.pem ]; then
+    mv ~/.ssh/kp-$STACK_NAME.pem ~/.ssh/kp-$STACK_NAME.pem-$DEPLOY_DATETIME
   fi
-  aws ec2 create-key-pair --region=$REGION --key-name $BASTION_KEY_NAME --query 'KeyMaterial' --output text > ~/.ssh/kp-bastion.pem
-  chmod 0400 ~/.ssh/kp-bastion.pem
+  aws ec2 create-key-pair --region=$REGION --key-name kp-$STACK_NAME --query 'KeyMaterial' --output text > ~/.ssh/kp-$STACK_NAME.pem
+  chmod 0400 ~/.ssh/kp-$STACK_NAME.pem
 else
   echo "Found bastion key pair"
 fi
 
-# create a bastion if it doesn't exist.  Will update if anything changed
-BASTION_HOSTNAME=ssh
-STACK_NAME=bastion
 BASTION=$(
-  aws cloudformation describe-stacks --region=$REGION --stack-name bastion --query 'Stacks[*].StackId' --output text
+  aws cloudformation describe-stacks --region=$REGION --stack-name $STACK_NAME --query 'Stacks[*].StackId' --output text
 )
 
 if  [ -z "$BASTION" ] || [ "${BASTION}" == "None" ]; then
@@ -110,7 +112,7 @@ STATUS=$(
     --parameters ParameterKey=EnvironmentName,ParameterValue=$ENVIRONMENT \
     ParameterKey=VpcId,ParameterValue=$VPC_ID \
     ParameterKey=AmiId,ParameterValue=$AMI_ID \
-    ParameterKey=KeyName,ParameterValue=$BASTION_KEY_NAME \
+    ParameterKey=KeyName,ParameterValue=kp-$STACK_NAME \
     ParameterKey=InstanceType,ParameterValue=$INSTANCETYPE \
     ParameterKey=SubDomainName,ParameterValue=$BASTION_HOSTNAME \
     ParameterKey=PublicHostedZoneName,ParameterValue=$DOMAIN_NAME.
@@ -147,7 +149,7 @@ STATUS=$(
     ParameterKey=DatabaseEngine,ParameterValue=aurora \
     ParameterKey=DatabaseUser,ParameterValue=dbadmin \
     ParameterKey=DatabasePassword,ParameterValue=$DBPASSWORD \
-    ParameterKey=DatabaseName,ParameterValue=$ENVIRONMENT$APPNAME
+    ParameterKey=DatabaseName,ParameterValue=$APPNAME
 )
 
 # process hangs if we call for a "wait" on a stack that doesn't have an update
@@ -186,10 +188,11 @@ STATUS=$(
     --stack-name $STACK_NAME \
     --template-body file://alb.yml \
     --parameters ParameterKey=EnvironmentName,ParameterValue=$ENVIRONMENT \
+    ParameterKey=ApplicationName,ParameterValue=$APPNAME \
     ParameterKey=LoadBalancerScheme,ParameterValue='internet-facing' \
     ParameterKey=LoadBalancerCertificateArn,ParameterValue=$CERT_ARN \
     ParameterKey=LoadBalancerDeregistrationDelay,ParameterValue=300 \
-    ParameterKey=PublicHostedZoneName,ParameterValue=$DOMAIN_NAME \
+    ParameterKey=PublicHostedZoneName,ParameterValue=$DOMAIN_NAME. \
     ParameterKey=PublicHostedZoneId,ParameterValue=$ZONE_ID \
     ParameterKey=VpcId,ParameterValue=$VPC_ID
 )
@@ -202,15 +205,16 @@ else
 fi
 
 # create an application keypair if it doesn't exist.  Will update if anything changed
+STACK_NAME=$APPNAME
 APP_KEY=$(
-  aws ec2 describe-key-pairs --key-names kp-$APPNAME --output text
+  aws ec2 describe-key-pairs --key-names kp-$STACK_NAME --output text
 )
 if [ -z "$APP_KEY" ]; then
-  if [ -f ~/.ssh/kp-$APPNAME.pem ]; then
-    mv ~/.ssh/kp-bastion.pem ~/.ssh/kp-bastion.pem-$DEPLOY_DATETIME
+  if [ -f ~/.ssh/kp-$STACK_NAME.pem ]; then
+    mv ~/.ssh/kp-$STACK_NAME.pem ~/.ssh/kp-$STACK_NAME.pem-$DEPLOY_DATETIME
   fi
-  aws ec2 create-key-pair --region=$REGION --key-name kp-$APPNAME --query 'KeyMaterial' --output text > ~/.ssh/kp-$APPNAME.pem
-  chmod 0400 ~/.ssh/kp-$APPNAME.pem
+  aws ec2 create-key-pair --region=$REGION --key-name kp-$STACK_NAME --query 'KeyMaterial' --output text > ~/.ssh/kp-$STACK_NAME.pem
+  chmod 0400 ~/.ssh/kp-$STACK_NAME.pem
 else
   echo "Found application key pair"
 fi
@@ -220,10 +224,10 @@ STACK_NAME=asg
 ASG=$(
   aws cloudformation describe-stacks --region=$REGION --stack-name asg --query 'Stacks[*].StackId' --output text
 )
+TARGET_GROUP_ARN=$(
+  aws elbv2 describe-target-groups --region=$REGION --query 'TargetGroups[*].TargetGroupArn' --output text
+)
 if  [ -z "$ASG" ] || [ "${ASG}" == "None" ] || [ ${#ASG} -lt 50 ]; then
-  TARGET_GROUP_ARN=$(
-	  aws elbv2 describe-target-groups --region=$REGION --query 'TargetGroups[*].TargetGroupArn' --output text
-	)
   STACK_ACTION="create"
   echo "creating ${STACK_NAME}"
 else
